@@ -75,9 +75,24 @@ fi
 pkill -f "ollama serve" 2>/dev/null || true
 sleep 1
 
+# ---- 3.5. Cek GPU (biar T4 beneran terpakai, bukan CPU) ----
+echo "Deteksi GPU..."
+if command -v nvidia-smi &>/dev/null; then
+    GPU_INFO=$(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "")
+    echo "GPU: ${GPU_INFO:-tak terdeteksi (fallback CPU, lambat)}"
+    # Pastikan Ollama boleh pakai GPU; CUDA_VISIBLE_DEVICES biarkan default (semua)
+else
+    echo "nvidia-smi tak ada. Cek driver: 'nvidia-smi' di Colab."
+fi
+
 # ---- 4. Serve Ollama di background (dulu) ----
-echo "Serve Ollama di port $PORT..."
-OLLAMA_HOST="0.0.0.0:$PORT" OLLAMA_MODELS="${OLLAMA_MODELS:-$HOME/.ollama/models}" nohup ollama serve > /tmp/ollama.log 2>&1 &
+# OLLAMA_CONTEXT_LENGTH=32768: context besar untuk web search + kode panjang
+# (model Q4 ~9GB + KV cache ~4GB = ~13GB, muat di GPU 15GB)
+echo "Serve Ollama di port $PORT (context 32K, GPU on)..."
+OLLAMA_HOST="0.0.0.0:$PORT" \
+OLLAMA_MODELS="${OLLAMA_MODELS:-$HOME/.ollama/models}" \
+OLLAMA_CONTEXT_LENGTH=32768 \
+nohup ollama serve > /tmp/ollama.log 2>&1 &
 # Tunggu sampai siap (max 30 detik)
 READY=0
 for i in $(seq 1 30); do
@@ -117,6 +132,22 @@ if ollama create jhopan-unfiltered -f /tmp/Modelfile 2>&1 | tail -1; then
     echo "Model jhopan-unfiltered siap."
     # Pakai model unfiltered sebagai default bila JAILBREAK=1
     export MODEL="jhopan-unfiltered"
+fi
+
+# ---- 5.6. Verifikasi GPU terpakai saat inference ----
+# Jalanin 1 inference ringan, cek nvidia-smi apakah GPU load naik
+echo "Verifikasi GPU (1 inference ringan)..."
+if command -v nvidia-smi &>/dev/null; then
+    BEFORE=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
+    ollama run jhopan-unfiltered "jawab: siap" 2>/dev/null >/dev/null || true
+    sleep 2
+    AFTER=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null | head -1 || echo 0)
+    echo "GPU VRAM before/after: ${BEFORE}MB / ${AFTER}MB"
+    if [ "$AFTER" -gt "$BEFORE" ]; then
+        echo "GPU TERPAKAI Ollama (VRAM naik ${AFTER}-${BEFORE}MB)"
+    else
+        echo "PERINGATAN: VRAM tak naik — Ollama mungkin pakai CPU (lambat). Cek nvidia-smi manual."
+    fi
 fi
 
 # ---- 6. Install cloudflared ----
