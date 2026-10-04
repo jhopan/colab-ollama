@@ -88,10 +88,13 @@ fi
 # ---- 4. Serve Ollama di background (dulu) ----
 # OLLAMA_CONTEXT_LENGTH=32768: context besar untuk web search + kode panjang
 # (model Q4 ~9GB + KV cache ~4GB = ~13GB, muat di GPU 15GB)
-echo "Serve Ollama di port $PORT (context 32K, GPU on)..."
+# OLLAMA_ORIGINS="*": izinkan CORS, agar Web UI standalone bisa akses /v1
+# langsung dari browser (tanpa proxy di Colab).
+echo "Serve Ollama di port $PORT (context 32K, GPU on, CORS open)..."
 OLLAMA_HOST="0.0.0.0:$PORT" \
 OLLAMA_MODELS="${OLLAMA_MODELS:-$HOME/.ollama/models}" \
 OLLAMA_CONTEXT_LENGTH=32768 \
+OLLAMA_ORIGINS="*" \
 nohup ollama serve > /tmp/ollama.log 2>&1 &
 # Tunggu sampai siap (max 30 detik)
 READY=0
@@ -165,41 +168,26 @@ bash /content/colab-ollama/setup-tools.sh || {
     echo "WARNING: SearXNG gagal, model tetap jalan tapi tanpa web search"
 }
 
-# ---- 6.6. Start web UI (Flask, chat + tools + proxy /v1 ke Ollama) ----
-echo "Start web UI di port 5000..."
-# Pakai model unfiltered (jika tersedia), selain itu model dasar
+# ---- 6.6. (Web UI kini standalone di browser — tak perlu Flask di Colab.) ----
+# Ollama expose /v1 langsung (CORS open). Web UI: buka webui-standalone.html
+# di mana pun, paste URL Ollama + API key + model.
 ACTIVE_MODEL="$MODEL"
 if ollama list 2>/dev/null | grep -q "jhopan-unfiltered"; then
     ACTIVE_MODEL="jhopan-unfiltered"
-    echo "Web UI pakai model: $ACTIVE_MODEL (no-refusal persona baked-in)"
-else
-    echo "Web UI pakai model: $ACTIVE_MODEL (persona via webui system prompt)"
+    echo "Model aktif (untuk web UI standalone): $ACTIVE_MODEL"
 fi
-pkill -f "webui.py" 2>/dev/null || true
-sleep 1
-python3 -c "import flask" 2>/dev/null || pip install --quiet flask requests
-OLLAMA_API="http://localhost:$PORT" SEARCH_API="http://localhost:8080" \
-MODEL="$ACTIVE_MODEL" PORT=5000 JAILBREAK=1 \
-nohup python3 /content/colab-ollama/webui.py > /tmp/webui.log 2>&1 &
-# Tunggu webui siap
-WEBREADY=0
-for i in $(seq 1 20); do
-    if curl -s --max-time 2 "http://localhost:5000/health" > /dev/null 2>&1; then
-        WEBREADY=1; break
-    fi
-    sleep 1
-done
-[ "$WEBREADY" = 1 ] && echo "Web UI siap di port 5000" || {
-    echo "ERROR: webui tidak hidup. Cek /tmp/webui.log"; tail -20 /tmp/webui.log;
-}
+echo "Web UI standalone: buka webui-standalone.html di browser, lalu:"
+echo "  1. Salin URL Ollama dari output di bawah (bagian 'Akses dari Web UI')"
+echo "  2. Paste di field 'Base URL' web UI + API key (isi apa saja, mis 'ollama')"
+echo "  3. Pilih model '$ACTIVE_MODEL', mulai chat."
 
-# ---- 7. Hentikan tunnel lama, buka ke WEB UI (satu URL: web + API) ----
+# ---- 7. Hentikan tunnel lama, buka ke OLLAMA (satu URL: API, CORS open) ----
 pkill -f "cloudflared tunnel" 2>/dev/null || true
 sleep 1
 
-echo "Buka Cloudflare Tunnel (ke webui port 5000)..."
+echo "Buka Cloudflare Tunnel (ke Ollama port $PORT)..."
 TUNNEL_LOG=/tmp/tunnel.log
-nohup cloudflared tunnel --url "http://localhost:5000" > "$TUNNEL_LOG" 2>&1 &
+nohup cloudflared tunnel --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
 
 # Tunggu sampai URL muncul (max 60 detik)
 URL=""
@@ -215,44 +203,47 @@ if [ -z "$URL" ]; then
     exit 1
 fi
 
-# ---- 8. Verify endpoint luar (web + API) ----
+# ---- 8. Verify endpoint luar (Ollama API) ----
 echo "Verifikasi $URL ..."
-if curl -s "$URL/health" | grep -q '"ok"'; then
-    echo "Web UI luar OK"
-else
-    echo "PERINGATAN: web UI belum respon. Tunnel mungkin butuh waktu."
-fi
 if curl -s "$URL/v1/models" | grep -q '"model"'; then
     echo "API /v1 luar OK"
 else
-    echo "PERINGATAN: API /v1 belum respon."
+    echo "PERINGATAN: API /v1 belum respon. Tunnel mungkin butuh waktu (30-60 dtk)."
+    sleep 20
+    if curl -s "$URL/v1/models" | grep -q '"model"'; then
+        echo "API /v1 luar OK (setelah wait)"
+    fi
 fi
 
 echo ""
 echo "==============================="
 echo "  colab-ollama siap"
-echo "  Model base  : $MODEL"
-echo "  Model aktif : ${ACTIVE_MODEL:-$MODEL}"
-echo "  Web UI      : $URL"
-echo "  API OpenAI  : $URL/v1/chat/completions"
-echo "  Web search  : $URL (model bisa browse)"
-echo "  No-refusal  : aktif (persona red-team baked-in)"
-echo "  Local Ollama: http://localhost:$PORT"
-echo "  Local Web   : http://localhost:5000"
+echo "  Model base    : $MODEL"
+echo "  Model aktif   : ${ACTIVE_MODEL:-$MODEL}"
+echo "  Ollama /v1    : $URL/v1   (CORS open, OpenAI-compatible)"
+echo "  Local Ollama  : http://localhost:$PORT"
+echo "  SearXNG local : http://localhost:8080"
+echo "  No-refusal    : aktif (persona red-team baked-in)"
 echo ""
-echo "  Buka browser: $URL"
-echo "  Atau curl:"
-echo "    curl $URL/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"${ACTIVE_MODEL:-$MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"halo\"}]}'"
+echo "  ACCES DE WEB UI STANDALONE (buka di browser mana pun):"
+echo "    1. Download/buka: webui-standalone.html (di repo ini)"
+echo "       -> bisa di-file:/// atau host di mana pun (GH Pages, VPS, dll)"
+echo "    2. Isikan:  Base URL = $URL/v1"
+echo "                API Key  = (isi apa saja, mis: 'ollama')"
+echo "                Model    = ${ACTIVE_MODEL:-$MODEL}"
+echo "    3. Chat. Web UI simpan config di localStorage, bisa pindah mesin."
+echo "  API bisa juga di-forward ke Panrouter: provider ollama, baseUrl=$URL"
+echo "  Atau curl langsung:"
+echo "    curl $URL/v1/chat/completions -H 'Authorization: Bearer ollama' -H 'Content-Type: application/json' -d '{\"model\":\"${ACTIVE_MODEL:-$MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"halo\"}]}'"
 echo "==============================="
 
 # Simpan URL ke file agar bisa di-print ulang / dipakai Panrouter
 {
     echo "OLLAMA_BASE_URL=$URL/v1"
-    echo "WEB_UI_URL=$URL"
+    echo "OLLAMA_API_KEY=ollama"
     echo "MODEL=$MODEL"
     echo "ACTIVE_MODEL=${ACTIVE_MODEL:-$MODEL}"
     echo "LOCAL_PORT=$PORT"
-    echo "WEB_PORT=5000"
     date
 } > /tmp/colab-ollama.env
 echo "Config ditulis ke /tmp/colab-ollama.env"
@@ -261,5 +252,6 @@ if [ "$IN_COLAB" = true ]; then
     echo "Juga disimpan: $DRIVE_DIR/last.env"
 fi
 
-echo "Selesai. Ollama + SearXNG + Web UI + tunnel jalan."
+echo "Selesai. Ollama (CORS open) + SearXNG + tunnel jalan."
+echo "Web UI: buka webui-standalone.html di browser, paste URL di atas."
 echo "Session idle 90 menit = mati; keepalive.sh sudah jalan."
