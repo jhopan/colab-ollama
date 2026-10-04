@@ -28,6 +28,11 @@ if command -v ollama &>/dev/null; then
     echo "Ollama sudah ada: $(ollama --version)"
 else
     echo "Install Ollama..."
+    # Colab image sering tak punya zstd; installer Ollama butuh untuk extract
+    if ! command -v zstd &>/dev/null; then
+        echo "Install zstd dulu..."
+        apt-get update -qq && apt-get install -y -qq zstd 2>/dev/null || sudo apt-get install -y zstd
+    fi
     # Colab = Linux, pakai script resmi
     if [ "$IN_COLAB" = true ]; then
         curl -fsSL https://ollama.com/install.sh | sh
@@ -35,7 +40,7 @@ else
         # local: asumsikan Linux; Windows pakai winget (di luar scope script ini)
         curl -fsSL https://ollama.com/install.sh | sh
     fi
-    export PATH="$HOME/.local/bin:$PATH:/usr/bin:$PATH"
+    export PATH="$HOME/.local/bin:$PATH:/usr/bin:/usr/local/bin:$PATH"
 fi
 
 # ---- 2. Cache model ke Google Drive (Colab) ----
