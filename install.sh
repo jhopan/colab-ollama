@@ -64,28 +64,40 @@ if [ "$IN_COLAB" = true ]; then
     echo "Model cache: $OLLAMA_MODELS"
 fi
 
-# ---- 3. Pull model ----
-echo "Pull model $MODEL..."
-ollama pull "$MODEL"
-echo "Model siap: $(ollama list | grep -F "$MODEL" || echo 'sudah ada di cache')"
-
-# ---- 4. Hentikan Ollama lama kalau ada (dari session sebelumnya) ----
+# ---- 3. Hentikan Ollama lama kalau ada (dari session sebelumnya) ----
 pkill -f "ollama serve" 2>/dev/null || true
 sleep 1
 
-# ---- 5. Serve Ollama di background ----
+# ---- 4. Serve Ollama di background (dulu) ----
 echo "Serve Ollama di port $PORT..."
-nohup ollama serve --host 0.0.0.0 --port "$PORT" > /tmp/ollama.log 2>&1 &
-sleep 3
-
-# Cek hidup
-if curl -s "http://localhost:$PORT/v1/models" > /dev/null 2>&1; then
-    echo "Ollama hidup. Model: $(curl -s http://localhost:$PORT/v1/models | grep -oP '"id":"\K[^"]+' || echo none)"
-else
-    echo "ERROR: Ollama tidak hidup. Cek /tmp/ollama.log"
-    tail -20 /tmp/ollama.log
+nohup env OLLAMA_MODELS="${OLLAMA_MODELS:-$HOME/.ollama/models}" ollama serve --host 0.0.0.0 --port "$PORT" > /tmp/ollama.log 2>&1 &
+# Tunggu sampai siap (max 30 detik)
+READY=0
+for i in $(seq 1 30); do
+    if curl -s --max-time 2 "http://localhost:$PORT/v1/models" > /dev/null 2>&1; then
+        READY=1; break
+    fi
+    sleep 1
+done
+if [ "$READY" = 0 ]; then
+    echo "ERROR: Ollama tidak hidup setelah 30 detik. Cek /tmp/ollama.log"
+    tail -30 /tmp/ollama.log
     exit 1
 fi
+echo "Ollama siap di port $PORT"
+
+# ---- 5. Pull model (server harus hidup dulu) ----
+echo "Pull model $MODEL..."
+PULLED=0
+for i in 1 2 3; do
+    if ollama pull "$MODEL" 2>&1; then
+        PULLED=1; break
+    fi
+    echo "Pull gagal (percobaan $i/3), retry..."
+    sleep 5
+done
+[ "$PULLED" = 1 ] || { echo "ERROR: pull model gagal 3x. Cek log di atas"; exit 1; }
+echo "Model siap: $(ollama list | grep -F "$MODEL" || echo 'sudah ada di cache')"
 
 # ---- 6. Install cloudflared ----
 if ! command -v cloudflared &>/dev/null; then
