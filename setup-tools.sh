@@ -128,7 +128,7 @@ def search(query, max_r=8):
     if not results:
         results = startpage_search(query, max_r)
     if not results:
-        results = startpage_search(query, max_r)
+        results = bing_search(query, max_r)
     if not results:
         print("All search engines failed", file=sys.stderr)
     return results
