@@ -241,6 +241,18 @@ def ollama_proxy(subpath):
             resp.headers[h] = v
     return resp
 
+@app.route("/search")
+def search_proxy():
+    """Proxy /search ke SearXNG endpoint (port 8080)."""
+    r = requests.get(f"{SEARCH}/search", params=request.args, timeout=30)
+    return jsonify(r.json())
+
+@app.route("/fetch")
+def fetch_proxy():
+    """Proxy /fetch ke SearXNG endpoint (port 8080)."""
+    r = requests.get(f"{SEARCH}/fetch", params=request.args, timeout=30)
+    return jsonify(r.json())
+
 if __name__ == "__main__":
     print(f"colab-ollama web+proxy at http://0.0.0.0:{PORT}")
     app.run(host="0.0.0.0", port=PORT, threaded=True)
