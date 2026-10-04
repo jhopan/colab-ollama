@@ -70,7 +70,7 @@ sleep 1
 
 # ---- 4. Serve Ollama di background (dulu) ----
 echo "Serve Ollama di port $PORT..."
-nohup env OLLAMA_MODELS="${OLLAMA_MODELS:-$HOME/.ollama/models}" ollama serve --host 0.0.0.0 --port "$PORT" > /tmp/ollama.log 2>&1 &
+OLLAMA_HOST="0.0.0.0:$PORT" OLLAMA_MODELS="${OLLAMA_MODELS:-$HOME/.ollama/models}" nohup ollama serve > /tmp/ollama.log 2>&1 &
 # Tunggu sampai siap (max 30 detik)
 READY=0
 for i in $(seq 1 30); do
