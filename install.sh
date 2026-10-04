@@ -114,19 +114,19 @@ sleep 1
 
 echo "Buka Cloudflare Tunnel..."
 TUNNEL_LOG=/tmp/tunnel.log
-nohup cloudflared tunnel --no-authtls --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
+nohup cloudflared tunnel --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
 
-# Tunggu sampai URL muncul
+# Tunggu sampai URL muncul (max 60 detik)
 URL=""
-for i in $(seq 1 60); do
-    URL=$(grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
+for i in $(seq 1 30); do
+    URL=$(grep -oiE 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
     [ -n "$URL" ] && break
     sleep 2
 done
 
 if [ -z "$URL" ]; then
-    echo "ERROR: tunnel tak menghasilkan URL. Cek $TUNNEL_LOG"
-    tail -20 "$TUNNEL_LOG"
+    echo "ERROR: tunnel tak menghasilkan URL. Cek /tmp/tunnel.log"
+    tail -30 "$TUNNEL_LOG"
     exit 1
 fi
 
