@@ -58,18 +58,27 @@ TOOLS = [
 ]
 
 def run_tool(name, args):
-    """Eksekusi tool, kembalikan string hasil."""
+    """Eksekusi tool, kembalikan string hasil (selalu sukses secara string)."""
     try:
         if name == "web_search":
-            r = requests.get(f"{SEARCH}/search", params={"q": args.get("query",""), "format":"json"}, timeout=30)
-            data = r.json()
+            r = requests.get(f"{SEARCH}/search", params={"q": args.get("query",""), "format":"json"}, timeout=40)
+            try:
+                data = r.json()
+            except Exception:
+                # Endpoint return non-JSON (block/error). Report clean, jangan crash.
+                return f"Search engine tak membalas (HTTP {r.status_code}). Coba query lain atau lebih spesifik."
             out = []
             for item in data.get("results", [])[:8]:
                 out.append(f"- {item.get('title','')} ({item.get('url','')})\n  {item.get('content','')[:300]}")
-            return "\n".join(out) if out else "Tidak ada hasil."
+            if out:
+                return "\n".join(out)
+            return "Tidak ada hasil dari search engine. Jawab dari pengetahuanmu saja, sebutkan bahwa info mungkin tidak mutakhir."
         elif name == "web_fetch":
-            r = requests.get(f"{SEARCH}/fetch", params={"url": args.get("url","")}, timeout=30)
-            return r.json().get("text", "Gagal fetch.")[:6000]
+            r = requests.get(f"{SEARCH}/fetch", params={"url": args.get("url","")}, timeout=40)
+            try:
+                return r.json().get("text", "Gagal fetch.")[:6000]
+            except Exception:
+                return f"Gagal fetch URL (HTTP {r.status_code})."
         return "Tool tidak dikenal."
     except Exception as e:
         return f"Error tool: {e}"

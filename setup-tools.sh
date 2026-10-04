@@ -66,7 +66,7 @@ def ddg_search(query, max_r=8):
     try:
         r = requests.post(
             "https://html.duckduckgo.com/html/",
-            data={"q": query}, headers=HEADERS, timeout=15
+            data={"q": query}, headers=HEADERS, timeout=20
         )
         r.raise_for_status()
         results = []
@@ -93,12 +93,53 @@ def ddg_search(query, max_r=8):
         print(f"ddg failed: {e}", file=sys.stderr)
         return []
 
-def bing_search(query, max_r=8):
-    """Bing HTML endpoint."""
+def startpage_search(query, max_r=8):
+    """Startpage — sering lebih reliable di datacenter."""
     try:
+        r = requests.post(
+            "https://www.startpage.com/sp/search",
+            data={"query": query, "cat": "web"},
+            headers={**HEADERS, "Referer": "https://www.startpage.com/"},
+            timeout=20
+        )
+        r.raise_for_status()
+        results = []
+        for m in re.finditer(
+            r'<a[^>]*class="w-gl__title[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.S
+        ):
+            url = m.group(1)
+            title = html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
+            results.append({"title": title, "url": url, "content": ""})
+            if len(results) >= max_r:
+                break
+        # Snippets
+        snippets = re.findall(r'<p[^>]*class="w-gl__description[^"]*"[^>]*>(.*?)</p>', r.text, re.S)
+        for i, s in enumerate(snippets):
+            if i < len(results):
+                results[i]["content"] = html.unescape(re.sub(r"<[^>]+>", "", s)).strip()
+        return results
+    except Exception as e:
+        print(f"startpage failed: {e}", file=sys.stderr)
+        return []
+
+def search(query, max_r=8):
+    """Multi-engine: DDG -> Startpage -> Bing. Return list (bisa kosong)."""
+    results = ddg_search(query, max_r)
+    if not results:
+        results = startpage_search(query, max_r)
+    if not results:
+        results = startpage_search(query, max_r)
+    if not results:
+        print("All search engines failed", file=sys.stderr)
+    return results
+
+def bing_search(query, max_r=8):
+    """Bing HTML endpoint (fallback terakhir)."""
+    try:
+        from urllib.parse import quote
         r = requests.get(
-            f"https://www.bing.com/search?q={requests.utils.quote(query)}",
-            headers=HEADERS, timeout=15
+            f"https://www.bing.com/search?q={quote(query)}",
+            headers=HEADERS, timeout=20
         )
         r.raise_for_status()
         results = []
@@ -112,13 +153,6 @@ def bing_search(query, max_r=8):
     except Exception as e:
         print(f"bing failed: {e}", file=sys.stderr)
         return []
-
-def search(query, max_r=8):
-    """Coba DDG dulu, fallback Bing."""
-    results = ddg_search(query, max_r)
-    if not results:
-        results = bing_search(query, max_r)
-    return results
 
 def fetch_url(url, max_chars=8000):
     """Scrape text dari URL (untuk tool web_fetch)."""
