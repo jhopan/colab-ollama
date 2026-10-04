@@ -108,13 +108,39 @@ if ! command -v cloudflared &>/dev/null; then
 fi
 command -v cloudflared &>/dev/null || { echo "cloudflared tak tersedia"; exit 1; }
 
-# ---- 7. Hentikan tunnel lama, bikin yang baru ----
+# ---- 6.5. Setup tools: SearXNG (search/scrape endpoint) ----
+echo "Setup SearXNG (web_search + web_fetch tool)..."
+bash /content/colab-ollama/setup-tools.sh || {
+    echo "WARNING: SearXNG gagal, model tetap jalan tapi tanpa web search"
+}
+
+# ---- 6.6. Start web UI (Flask, chat + tools + proxy /v1 ke Ollama) ----
+echo "Start web UI di port 5000..."
+pkill -f "webui.py" 2>/dev/null || true
+sleep 1
+python3 -c "import flask" 2>/dev/null || pip install --quiet flask requests
+OLLAMA_API="http://localhost:$PORT" SEARCH_API="http://localhost:8080" \
+MODEL="$MODEL" PORT=5000 \
+nohup python3 /content/colab-ollama/webui.py > /tmp/webui.log 2>&1 &
+# Tunggu webui siap
+WEBREADY=0
+for i in $(seq 1 20); do
+    if curl -s --max-time 2 "http://localhost:5000/health" > /dev/null 2>&1; then
+        WEBREADY=1; break
+    fi
+    sleep 1
+done
+[ "$WEBREADY" = 1 ] && echo "Web UI siap di port 5000" || {
+    echo "ERROR: webui tidak hidup. Cek /tmp/webui.log"; tail -20 /tmp/webui.log;
+}
+
+# ---- 7. Hentikan tunnel lama, buka ke WEB UI (satu URL: web + API) ----
 pkill -f "cloudflared tunnel" 2>/dev/null || true
 sleep 1
 
-echo "Buka Cloudflare Tunnel..."
+echo "Buka Cloudflare Tunnel (ke webui port 5000)..."
 TUNNEL_LOG=/tmp/tunnel.log
-nohup cloudflared tunnel --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
+nohup cloudflared tunnel --url "http://localhost:5000" > "$TUNNEL_LOG" 2>&1 &
 
 # Tunggu sampai URL muncul (max 60 detik)
 URL=""
@@ -130,31 +156,41 @@ if [ -z "$URL" ]; then
     exit 1
 fi
 
-# ---- 8. Verify endpoint luar ----
-echo "Verifikasi $URL/v1/models ..."
-if curl -s "$URL/v1/models" | grep -q '"model"'; then
-    echo "Endpoint luar OK"
+# ---- 8. Verify endpoint luar (web + API) ----
+echo "Verifikasi $URL ..."
+if curl -s "$URL/health" | grep -q '"ok"'; then
+    echo "Web UI luar OK"
 else
-    echo "PERINGATAN: endpoint luar belum respon. Tunnel mungkin butuh waktu."
+    echo "PERINGATAN: web UI belum respon. Tunnel mungkin butuh waktu."
+fi
+if curl -s "$URL/v1/models" | grep -q '"model"'; then
+    echo "API /v1 luar OK"
+else
+    echo "PERINGATAN: API /v1 belum respon."
 fi
 
 echo ""
 echo "==============================="
 echo "  colab-ollama siap"
-echo "  Model      : $MODEL"
-echo "  Local      : http://localhost:$PORT"
-echo "  Akses luar : $URL"
-echo "  API (OpenAI-compatible):"
-echo "    $URL/v1/chat/completions"
-echo "  Contoh curl:"
-echo "    curl $URL/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"halo\"}]}'"
+echo "  Model       : $MODEL"
+echo "  Web UI      : $URL"
+echo "  API OpenAI  : $URL/v1/chat/completions"
+echo "  Web search  : $URL (model bisa browse)"
+echo "  Local Ollama: http://localhost:$PORT"
+echo "  Local Web   : http://localhost:5000"
+echo ""
+echo "  Buka browser: $URL"
+echo "  Atau curl:"
+echo "    curl $URL/v1/chat/completions -H 'Content-Type: application/json' -d '{\"model\":\"$MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"cari berita AI terbaru\"}]}'"
 echo "==============================="
 
 # Simpan URL ke file agar bisa di-print ulang / dipakai Panrouter
 {
     echo "OLLAMA_BASE_URL=$URL/v1"
+    echo "WEB_UI_URL=$URL"
     echo "MODEL=$MODEL"
     echo "LOCAL_PORT=$PORT"
+    echo "WEB_PORT=5000"
     date
 } > /tmp/colab-ollama.env
 echo "Config ditulis ke /tmp/colab-ollama.env"
@@ -163,4 +199,5 @@ if [ "$IN_COLAB" = true ]; then
     echo "Juga disimpan: $DRIVE_DIR/last.env"
 fi
 
-echo "Selesai. Ollama + tunnel jalan. Session idle 90 menit = mati; pakai keepalive.sh"
+echo "Selesai. Ollama + SearXNG + Web UI + tunnel jalan."
+echo "Session idle 90 menit = mati; keepalive.sh sudah jalan."
