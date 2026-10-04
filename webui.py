@@ -108,7 +108,11 @@ def chat_with_tools(messages, max_rounds=3):
             timeout=600
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            # Ollama balas HTML/error page (bukan JSON) — report clean, jangan crash
+            return f"Gagal: Ollama balas non-JSON (HTTP {resp.status_code}). Cek /tmp/ollama.log di Colab.", None
         msg = data["choices"][0]["message"]
         tool_calls = msg.get("tool_calls")
         if not tool_calls:
@@ -167,21 +171,20 @@ footer button:disabled{opacity:.5;cursor:wait}
   <div class="sub">v$MODEL</div>
 </header>
 <div id="log"></div>
-<form id="form" onsubmit="return send()"><div style="display:contents"></div></form>
 <footer>
   <input id="q" placeholder="Tanya apa saja. Coba: 'cari berita AI terbaru 2026'" autocomplete="off">
-  <button id="btn" onclick="return send()">Kirim</button>
+  <button id="btn" type="button" onclick="send()">Kirim</button>
 </footer>
 <script>
 const log=document.getElementById('log');
 const q=document.getElementById('q');
 const btn=document.getElementById('btn');
-const form=document.getElementById('form');
 const history=[];
 function add(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
+q.addEventListener('keydown',e=>{if(e.key==='Enter')send();});
 async function send(){
   const text=q.value.trim();
-  if(!text)return false;
+  if(!text||btn.disabled)return;
   history.push({role:'user',content:text});
   add('user',text.replace(/</g,'&lt;'));
   q.value='';btn.disabled=true;
@@ -202,9 +205,8 @@ async function send(){
     add('sys','Error: '+e);
   }
   btn.disabled=false;
-  return false;
 }
-function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\\n/g,'<br>');}
+function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');}
 window.onload=()=>{add('sys','SIAP. Model: $MODEL di '+location.hostname+'. Ketik pertanyaan di bawah.');q.focus();};
 </script>
 </body></html>"""
@@ -215,31 +217,39 @@ def index():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json(force=True)
-    messages = data.get("messages", [])
-    # Batasi context (hindari overflow 32k)
-    if len(messages) > 20:
-        messages = messages[-20:]
-    tool_log = []
-    # Simpan hook untuk log tool call
-    global_orig = run_tool
-    logged = []
-    def run_tool_logged(name, args):
-        logged.append(f"[{name}] {json.dumps(args, ensure_ascii=False)[:200]}")
-        res = global_orig(name, args)
-        logged[-1] += f" -> {res[:120]}"
-        return res
-    # Monkeypatch
-    import builtins
-    old = globals().get('run_tool')
-    globals()['run_tool'] = run_tool_logged
-    reply, usage = chat_with_tools(list(messages))
-    globals()['run_tool'] = old
-    return jsonify({
-        "reply": reply,
-        "tool_log": logged,
-        "usage": usage
-    })
+    try:
+        data = request.get_json(force=True)
+        messages = data.get("messages", [])
+        # Batasi context (hindari overflow 32k)
+        if len(messages) > 20:
+            messages = messages[-20:]
+        # Simpan hook untuk log tool call
+        logged = []
+        def run_tool_logged(name, args):
+            logged.append(f"[{name}] {json.dumps(args, ensure_ascii=False)[:200]}")
+            res = run_tool(name, args)
+            logged[-1] += f" -> {res[:120]}"
+            return res
+        old = globals().get('run_tool')
+        globals()['run_tool'] = run_tool_logged
+        try:
+            reply, usage = chat_with_tools(list(messages))
+        finally:
+            globals()['run_tool'] = old
+        return jsonify({
+            "reply": reply,
+            "tool_log": logged,
+            "usage": usage
+        })
+    except Exception as e:
+        # KEMBALIKAN JSON, JANGAN crash ke HTML error page
+        # (frontend r.json() crash kalau dapat HTML: "Unexpected token '<'")
+        return jsonify({
+            "reply": f"Backend error: {e}. Cek /tmp/webui.log di Colab.",
+            "tool_log": [],
+            "usage": None,
+            "error": str(e)
+        }), 200
 
 @app.route("/health")
 def health():
