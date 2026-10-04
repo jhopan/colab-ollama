@@ -23,24 +23,36 @@ if [ -d /content/drive ] || [ -d "/content" ]; then
 fi
 echo "Environment: Colab=$IN_COLAB"
 
-# ---- 1. Install Ollama ----
+# ---- 1. Install Ollama (direct binary, skip installer that needs zstd) ----
+OLLAMA_VERSION="0.35.1"
 if command -v ollama &>/dev/null; then
     echo "Ollama sudah ada: $(ollama --version)"
 else
-    echo "Install Ollama..."
-    # Colab image sering tak punya zstd; installer Ollama butuh untuk extract
-    if ! command -v zstd &>/dev/null; then
-        echo "Install zstd dulu..."
-        apt-get update -qq && apt-get install -y -qq zstd 2>/dev/null || sudo apt-get install -y zstd
-    fi
-    # Colab = Linux, pakai script resmi
-    if [ "$IN_COLAB" = true ]; then
-        curl -fsSL https://ollama.com/install.sh | sh
-    else
-        # local: asumsikan Linux; Windows pakai winget (di luar scope script ini)
-        curl -fsSL https://ollama.com/install.sh | sh
+    echo "Install Ollama binary v$OLLAMA_VERSION..."
+    # Unduh binary langsung, extract ke /usr/local/bin
+    OLLAMA_DL="/tmp/ollama-linux-amd64.tar.zst"
+    curl -fsSL -o "$OLLAMA_DL" "https://github.com/ollama/ollama/releases/download/v$OLLAMA_VERSION/ollama-linux-amd64.tar.zst"
+    # Extract: zstd if available, else apt-get install, else fallback
+    if command -v tar &>/dev/null; then
+        # Tar zst: modern GNU tar supports zstd natively
+        tar --zstd -xf "$OLLAMA_DL" -C /usr/local 2>/dev/null || \
+        {
+            # If native tar fails, try zstd manual
+            if ! command -v zstd &>/dev/null; then
+                echo "Install zstd..."
+                (apt-get update -qq && apt-get install -y zstd) || \
+                (sudo apt-get update -qq && sudo apt-get install -y zstd)
+            fi
+            zstd -d "$OLLAMA_DL" -o /tmp/ollama.tar
+            tar -xf /tmp/ollama.tar -C /usr/local
+        }
     fi
     export PATH="$HOME/.local/bin:$PATH:/usr/bin:/usr/local/bin:$PATH"
+    echo "Ollama version: $(ollama --version 2>&1 || echo 'binary tidak ada')"
+    if ! command -v ollama &>/dev/null; then
+        echo "ERROR: Ollama binary gagal diinstall."
+        exit 1
+    fi
 fi
 
 # ---- 2. Cache model ke Google Drive (Colab) ----
