@@ -10,35 +10,17 @@ Jalankan **Ollama** di **Google Colab** (GPU T4 gratis), expose via **Cloudflare
 - Keepalive script cegah idle timeout 90m
 - Print URL + config ke `/tmp/colab-ollama.env`
 
-## Cara pakai
+## Cara pakai (satu perintah)
 
-### 1. Buka notebook di Colab
-1. Buka notebook.ipynb → File > Open notebook >
-2. Pilih `colab-ollama/notebook.ipynb` dari repo ini
-   (atau buka `https://colab.research.google.com/github/jhopanstore/colab-ollama/blob/main/notebook.ipynb`)
-3. Runtime > Change runtime type > GPU (T4)
+1. Buka [notebook](https://colab.research.google.com/github/jhopan/colab-ollama/blob/main/notebook.ipynb) di Colab
+2. Runtime > Change runtime type > **GPU**
+3. Di cell, jalankan:
+   ```
+   !curl -fsSL https://raw.githubusercontent.com/jhopan/colab-ollama/main/run.sh | bash
+   ```
+4. Output print URL `https://xxxx.trycloudflare.com`. Selesai.
 
-### 2. Jalankan semua cell
-Runtime > Run all
-- Cell 1: clone repo
-- Cell 2: mount Drive
-- Cell 3: `install.sh` → Ollama + model + tunnel
-- Cell 4: start keepalive
-- Cell 5: print URL + verify
-
-Output Cell 3 akhir:
-```
-===============================
-  colab-ollama siap
-  Model      : qwen2.5:14b
-  Local      : http://localhost:11434
-  Akses luar : https://xxxx.trycloudflare.com
-  API (OpenAI-compatible):
-    https://xxxx.trycloudflare.com/v1/chat/completions
-===============================
-```
-
-### 3. Akses dari luar / Panrouter
+### Akses dari luar / Panrouter
 ```bash
 URL="https://xxxx.trycloudflare.com"
 curl "$URL/v1/chat/completions" \
@@ -52,21 +34,18 @@ Di Panrouter: provider `ollama`, base URL = `https://xxxx.trycloudflare.com`.
 
 ### Ganti model
 ```bash
-MODEL=qwen2.5:7b bash /content/colab-ollama/install.sh
-# atau MODEL=llama3.1:8b, mistral:7b, qwen2.5:3b
+MODEL=qwen2.5:7b curl -fsSL https://raw.githubusercontent.com/jhopan/colab-ollama/main/run.sh | bash
 ```
 
-### Keepalive
-Sudah di-start otomatis notebook. Manual:
-```bash
-nohup bash /content/colab-ollama/keepalive.sh > /tmp/keepalive.log 2>&1 &
-```
+### CPU only
+Non-GPU pakai model kecil (`qwen2.5:3b` / `:7b`).
 
 ## Struktur
 ```
-install.sh        # install ollama+cloudflared, pull model, serve, tunnel, print URL
-keepalive.sh      # ping /v1 tiap 30m, cegah idle timeout
-notebook.ipynb    # 5 cell: clone → drive → install → keepalive → print URL
+run.sh          # SATU PERINTAH: clone + install + serve + tunnel + keepalive + print URL
+install.sh      # install ollama+cloudflared, pull model, serve, tunnel
+keepalive.sh    # ping /v1 tiap 30m, cegah idle timeout 90m
+notebook.ipynb  # cell curl run.sh
 ```
 
 ## Kendala
