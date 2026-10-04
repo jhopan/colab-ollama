@@ -8,7 +8,13 @@
 
 set -euo pipefail
 
-MODEL="${MODEL:-qwen2.5:14b}"
+# Model default: huihui_ai/qwen3-abliterated:8b (unfiltered, tool-calling).
+# Opsi lain (via MODEL env):
+#   huihui_ai/qwen3-abliterated:8b      ~5.5GB, unfiltered, tool-calling (default, paling seimbang)
+#   huihui_ai/gemma3-abliterated:12b    ~8GB, unfiltered, vision + 128k context
+#   richardyoung/qwen3-14b-abliterated  ~9GB, unfiltered, paling pintar muat 15GB
+#   qwen2.5:14b                         ~9GB, dengan guard (model standar, bukan unfiltered)
+MODEL="${MODEL:-huihui_ai/qwen3-abliterated:8b}"
 OLLAMA_HOME="/usr/share/ollama"
 PORT=11434
 DRIVE_DIR="/content/drive/MyDrive/colab-ollama"
