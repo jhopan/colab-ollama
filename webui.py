@@ -11,7 +11,7 @@ Alternatif: satu tunnel, Ollama 11434 + Web 5000 via reverse-proxy sederhana).
 Simplifikasi: run.sh expose TUNNEL KE PORT 5000 (web). Web proxy ke Ollama
 11434 internally, jadi user cukup satu URL.
 """
-import os, json, time, uuid, threading
+import os, json, time, uuid, threading, re
 import requests
 
 OLLAMA = os.environ.get("OLLAMA_API", "http://localhost:11434")
@@ -95,6 +95,18 @@ def run_tool(name, args):
     except Exception as e:
         return f"Error tool: {e}"
 
+def strip_thinking(text):
+    """Qwen3 emit 思考 (thinking) block; strip biar hasil bersih.
+    Buang 块, sisa tag, dan CJK thinking token."""
+    if not text:
+        return text
+    text = re.sub(r'\u6bb5\u843d', '', text)
+    text = re.sub(r'<\/think>', '', text)
+    text = re.sub(r'<\/?think>', '', text)
+    text = re.sub(r'[\u4e00-\u9fff]+', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    return text
+
 def chat_with_tools(messages, max_rounds=3):
     """Loop: kirim ke Ollama, jika tool_call -> jalankan -> ulang."""
     # Injeksi system prompt no-refusal di posisi pertama (override bawaan)
@@ -116,7 +128,7 @@ def chat_with_tools(messages, max_rounds=3):
         msg = data["choices"][0]["message"]
         tool_calls = msg.get("tool_calls")
         if not tool_calls:
-            return msg.get("content", ""), data.get("usage")
+            return strip_thinking(msg.get("content", "")), data.get("usage")
         # Tambahkan assistant msg + hasil tool
         msgs.append({
             "role": "assistant",
@@ -180,31 +192,42 @@ const log=document.getElementById('log');
 const q=document.getElementById('q');
 const btn=document.getElementById('btn');
 const history=[];
+let busy=false;
 function add(cls,html){const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;log.appendChild(d);log.scrollTop=log.scrollHeight;return d;}
-q.addEventListener('keydown',e=>{if(e.key==='Enter')send();});
+function setLoading(on){
+  btn.disabled=on; busy=on;
+  btn.textContent=on?'Memproses…':'Kirim';
+}
+q.addEventListener('keydown',e=>{if(e.key==='Enter'&&!busy)send();});
 async function send(){
+  if(busy)return;
   const text=q.value.trim();
-  if(!text||btn.disabled)return;
+  if(!text)return;
   history.push({role:'user',content:text});
   add('user',text.replace(/</g,'&lt;'));
-  q.value='';btn.disabled=true;
+  q.value='';
+  setLoading(true);
   const think=add('sys','');
   think.className='msg sys';
-  think.innerHTML='';
-  think.textContent='Berpikir'+(text.match(/cari|web|url|https?:/i)?' + web search':'');
+  think.textContent='Berpikir'+(text.match(/cari|web|url|https?:/i)?' + web search':'')+' (model 14B bisa 30-120 detik)…';
   think.id='think';
+  const ctrl=new AbortController();
+  const to=setTimeout(()=>ctrl.abort(), 300000); // 5 menit max
   try{
-    const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history})});
+    const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history}),signal:ctrl.signal});
     const data=await r.json();
+    clearTimeout(to);
     const t=document.getElementById('think');if(t)t.remove();
-    (data.tool_log||[]).forEach(m=>add('tool',m));
-    add('assistant','<span class="badge">AI</span>+'+esc(data.reply));
+    (data.tool_log||[]).forEach(m=>add('tool',esc(m)));
+    add('assistant','<span class="badge">AI</span> '+esc(data.reply));
     history.push({role:'assistant',content:data.reply});
   }catch(e){
+    clearTimeout(to);
     const t=document.getElementById('think');if(t)t.remove();
-    add('sys','Error: '+e);
+    if(e.name==='AbortError')add('sys','Timeout setelah 5 menit. Coba lagi.');
+    else add('sys','Error: '+e);
   }
-  btn.disabled=false;
+  setLoading(false);
 }
 function esc(s){return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');}
 window.onload=()=>{add('sys','SIAP. Model: $MODEL di '+location.hostname+'. Ketik pertanyaan di bawah.');q.focus();};
