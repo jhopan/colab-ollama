@@ -10,7 +10,7 @@
 set -uo pipefail
 PORT=8080
 OLLAMA_API="${OLLAMA_API:-http://localhost:11434}"
-SEARCH_API="${SEARCH_API:-http://localhost:8080}"  # local search endpoint (selain webui)
+SEARCH_API="${SEARCH_API:-http://localhost:8081}"  # SearXNG endpoint (install.sh start di 8081)
 MODEL="${MODEL:-jhopan-unfiltered}"
 
 echo "=== webui.sh: serve Web UI + proxy ==="
@@ -117,17 +117,16 @@ PYEOF
 pkill -f "colab-webui.py" 2>/dev/null || true
 sleep 1
 
-# Cek SearXNG endpoint local (dibuat install.sh via setup-tools.sh di port 8080)
-# -- tapi webui juga mau port 8080. Jadi: re-map.
-# SearXNG local di port 8081, webui di port 8080.
-SEARCH_LOCAL_PORT=8081
-# Restart SearXNG di port baru
-pkill -f "local-search.py" 2>/dev/null || true
-sleep 1
-python3 /content/colab-ollama/search-endpoint.py 8081 > /tmp/search.log 2>&1 &
-sleep 2
+# Cek SearXNG endpoint di 8081 (di-start install.sh). Kalau tak ada, start di sini.
+if ! curl -s --max-time 2 "http://localhost:8081/health" > /dev/null 2>&1; then
+    echo "SearXNG tak hidup di 8081, start..."
+    pkill -f "search-endpoint.py" 2>/dev/null || true
+    sleep 1
+    nohup python3 /content/colab-ollama/search-endpoint.py 8081 > /tmp/search.log 2>&1 &
+    sleep 2
+fi
 
-# Jalankan webui
+# Jalankan webui di port 8080
 OLLAMA_API="$OLLAMA_API" SEARCH_API="http://localhost:8081" MODEL="$MODEL" PORT=8080 \
 nohup python3 /tmp/colab-webui.py > /tmp/webui.log 2>&1 &
 

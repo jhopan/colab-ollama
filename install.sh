@@ -162,9 +162,10 @@ if ! command -v cloudflared &>/dev/null; then
 fi
 command -v cloudflared &>/dev/null || { echo "cloudflared tak tersedia"; exit 1; }
 
-# ---- 6.5. Setup tools: SearXNG (search/scrape endpoint) ----
-echo "Setup SearXNG (web_search + web_fetch tool)..."
-bash /content/colab-ollama/setup-tools.sh || {
+# ---- 6.5. Setup tools: SearXNG (search/scrape endpoint) di port 8081 ----
+# Port 8080 dibiarkan untuk webui.sh. SearXNG di 8081.
+echo "Setup SearXNG (web_search + web_fetch tool) di port 8081..."
+SEARXNG_PORT=8081 bash /content/colab-ollama/setup-tools.sh || {
     echo "WARNING: SearXNG gagal, model tetap jalan tapi tanpa web search"
 }
 
