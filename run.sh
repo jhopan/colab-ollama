@@ -38,13 +38,17 @@ fi
 
 bash /content/colab-ollama/install.sh
 
-# Start keepalive
+# Start keepalive (cegah idle timeout, sekali jalan, background)
 nohup bash /content/colab-ollama/keepalive.sh > /tmp/keepalive.log 2>&1 &
-echo "Keepalive di-start. Cek: tail /tmp/keepalive.log"
+echo "Keepalive di-start (background)."
+
+# Start Web UI server + tunnel (URL SATU: web UI + proxy /v1 Ollama + /search SearXNG)
+echo ""
+echo ">>> Start Web UI + tunnel..."
+bash /content/colab-ollama/webui.sh
 
 echo ""
 echo "=================================================="
-echo " colab-ollama SELESAI"
-echo " Baca /tmp/colab-ollama.env untuk URL + config:"
-cat /tmp/colab-ollama.env
+echo " SELESAI — BUKA URL WEB UI DI ATAS, LANGSUNG CHAT."
+echo " (zero-config: halaman auto-detect, tak perlu isi Base URL)"
 echo "=================================================="
