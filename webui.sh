@@ -1,23 +1,55 @@
 #!/bin/bash
-# colab-ollama webui.sh
-# CELL 3 di Colab: serve webui-standalone.html + proxy /v1 Ollama + /search SearXNG
-# di satu port (8888), expose via Cloudflare Tunnel.
-# Satu URL: web UI (buka di browser mana pun) + API Ollama + search/scrape.
+# colab-ollama webui.sh  —  SEL 3: Web UI (URL sendiri)
+# Serve webui-standalone.html + proxy /v1 Ollama + /search SearXNG di port 8888,
+# expose via Cloudflare Tunnel (URL terpisah dari Ollama tunnel).
 #
-# Cara pakai di Colab:
-#   !bash /content/colab-ollama/webui.sh
+# Self-contained: bisa di-curl langsung tanpa run.sh (auto-clone repo,
+# install cloudflared, start SearXNG kalau belum hidup).
+# Web UI tetap terserve walau Ollama belum install — chat hanya sukses
+# setelah Ollama hidup di localhost:11434.
+#
+# Cara pakai di Colab (sel 3):
+#   !curl -fsSL https://raw.githubusercontent.com/jhopan/colab-ollama/main/webui.sh | bash
 
 set -uo pipefail
+
 PORT=8888
 OLLAMA_API="${OLLAMA_API:-http://localhost:11434}"
-SEARCH_API="${SEARCH_API:-http://localhost:8081}"  # SearXNG endpoint (install.sh start di 8081)
+SEARCH_PORT=8081
+SEARCH_API="http://localhost:$SEARCH_PORT"
 MODEL="${MODEL:-jhopan-unfiltered}"
 
-echo "=== webui.sh: serve Web UI + proxy ==="
+echo "=== webui.sh: serve Web UI + proxy (port $PORT) ==="
 
-# Hentikan instance lama
-pkill -f "colab-webui" 2>/dev/null || true
+# Clone repo kalau belum ada (self-contained)
+cd /content
+if [ ! -d colab-ollama ]; then
+    echo "Repo belum ada, clone..."
+    git clone https://github.com/jhopan/colab-ollama /content/colab-ollama 2>/dev/null || \
+        echo "WARNING: clone gagal (offline?). Web UI tetap jalan, tool tak bisa."
+fi
+
+# Install cloudflared kalau belum ada (self-contained)
+if ! command -v cloudflared &>/dev/null; then
+    echo "Install cloudflared..."
+    curl -fsSL -o /tmp/cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 2>/dev/null
+    chmod +x /tmp/cloudflared 2>/dev/null
+    cp /tmp/cloudflared /usr/local/bin/cloudflared 2>/dev/null || true
+fi
+command -v cloudflared &>/dev/null || { echo "ERROR: cloudflared tak tersedia"; exit 1; }
+
+# Hentikan instance webui lama
+pkill -f "colab-webui.py" 2>/dev/null || true
 sleep 1
+
+# SearXNG: start di 8081 kalau belum hidup (self-contained, tak bergantung install.sh)
+if ! curl -s --max-time 2 "http://localhost:$SEARCH_PORT/health" > /dev/null 2>&1; then
+    echo "SearXNG tak hidup di $SEARCH_PORT, start..."
+    pkill -f "search-endpoint.py" 2>/dev/null || true
+    sleep 1
+    nohup python3 /content/colab-ollama/search-endpoint.py "$SEARCH_PORT" > /tmp/search.log 2>&1 &
+    sleep 2
+fi
 
 # Buat mini-server: serve HTML + proxy /v1 ke Ollama + /search,/fetch ke local search
 cat > /tmp/colab-webui.py << 'PYEOF'
@@ -113,41 +145,36 @@ if __name__ == "__main__":
     HTTPServer(("0.0.0.0", PORT), H).serve_forever()
 PYEOF
 
-# Hentikan process lama di port
-pkill -f "colab-webui.py" 2>/dev/null || true
-sleep 1
-
-# Cek SearXNG endpoint di 8081 (di-start install.sh). Kalau tak ada, start di sini.
-if ! curl -s --max-time 2 "http://localhost:8081/health" > /dev/null 2>&1; then
-    echo "SearXNG tak hidup di 8081, start..."
-    pkill -f "search-endpoint.py" 2>/dev/null || true
-    sleep 1
-    nohup python3 /content/colab-ollama/search-endpoint.py 8081 > /tmp/search.log 2>&1 &
-    sleep 2
-fi
-
 # Jalankan webui di port 8888
-OLLAMA_API="$OLLAMA_API" SEARCH_API="http://localhost:8081" MODEL="$MODEL" PORT=8888 \
+OLLAMA_API="$OLLAMA_API" SEARCH_API="$SEARCH_API" MODEL="$MODEL" PORT=$PORT \
 nohup python3 /tmp/colab-webui.py > /tmp/webui.log 2>&1 &
 
 # Tunggu webui siap
 READY=0
 for i in $(seq 1 20); do
-    if curl -s --max-time 2 "http://localhost:8888/health" | grep -q '"ok"'; then
+    if curl -s --max-time 2 "http://localhost:$PORT/health" | grep -q '"ok"'; then
         READY=1; break
     fi
     sleep 1
 done
-[ "$READY" = 1 ] && echo "Web UI siap di port 8888" || {
+[ "$READY" = 1 ] && echo "Web UI siap di port $PORT" || {
     echo "ERROR: webui tak hidup. Cek /tmp/webui.log"; tail -20 /tmp/webui.log; exit 1;
 }
 
-# Buka tunnel baru ke port 8888 (webui) — pkill spesifik, tak ganggu tunnel Ollama
-pkill -f "cloudflared tunnel --url http://localhost:8888" 2>/dev/null || true
+# Cek status Ollama
+if curl -s --max-time 5 "$OLLAMA_API/v1/models" > /dev/null 2>&1; then
+    echo "Ollama HIRUP di $OLLAMA_API (chat akan jalan)"
+else
+    echo "PERINGATAN: Ollama TIDAK hidup di $OLLAMA_API — jalankan SEL 1 (run.sh) dulu."
+    echo "Web UI tetap terserve; chat akan gagal sampai Ollama hidup."
+fi
+
+# Buka tunnel (URL sendiri, terpisah dari tunnel Ollama — pkill spesifik)
+pkill -f "cloudflared tunnel --url http://localhost:$PORT" 2>/dev/null || true
 sleep 1
 TUNNEL_LOG=/tmp/webui-tunnel.log
 rm -f "$TUNNEL_LOG"
-nohup cloudflared tunnel --url "http://localhost:8888" > "$TUNNEL_LOG" 2>&1 &
+nohup cloudflared tunnel --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
 URL=""
 for i in $(seq 1 30); do
     URL=$(grep -oiE 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
@@ -163,16 +190,18 @@ done
     echo "MODEL=$MODEL"
     date
 } > /tmp/colab-webui.env
-echo "Juga: $URL/v1 (Ollama via webui)"
 
 echo ""
 echo "==============================="
-echo " Web UI siap"
+echo " Web UI siap (URL sendiri)"
 echo "  Buka di browser mana pun : $URL"
 echo "  Ollama /v1 (via webui)   : $URL/v1"
-echo "  Local Ollama             : http://localhost:11434"
+echo "  Ollama local             : $OLLAMA_API"
 echo ""
 echo "  Di Web UI:  Base URL = $URL/v1"
 echo "              API Key  = ollama"
 echo "              Model    = $MODEL"
+echo ""
+echo "  Kalau Ollama belum install: jalankan SEL 1 (run.sh) dulu."
+echo "  Kalau runtime mau tetap hidup: SEL 2 (keepalive.sh)."
 echo "==============================="
