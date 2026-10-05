@@ -142,10 +142,11 @@ done
     echo "ERROR: webui tak hidup. Cek /tmp/webui.log"; tail -20 /tmp/webui.log; exit 1;
 }
 
-# Buka tunnel baru ke port 8888 (webui)
-pkill -f "cloudflared tunnel" 2>/dev/null || true
+# Buka tunnel baru ke port 8888 (webui) — pkill spesifik, tak ganggu tunnel Ollama
+pkill -f "cloudflared tunnel --url http://localhost:8888" 2>/dev/null || true
 sleep 1
 TUNNEL_LOG=/tmp/webui-tunnel.log
+rm -f "$TUNNEL_LOG"
 nohup cloudflared tunnel --url "http://localhost:8888" > "$TUNNEL_LOG" 2>&1 &
 URL=""
 for i in $(seq 1 30); do

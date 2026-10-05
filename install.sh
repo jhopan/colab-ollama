@@ -182,12 +182,14 @@ echo "  1. Salin URL Ollama dari output di bawah (bagian 'Akses dari Web UI')"
 echo "  2. Paste di field 'Base URL' web UI + API key (isi apa saja, mis 'ollama')"
 echo "  3. Pilih model '$ACTIVE_MODEL', mulai chat."
 
-# ---- 7. Hentikan tunnel lama, buka ke OLLAMA (satu URL: API, CORS open) ----
-pkill -f "cloudflared tunnel" 2>/dev/null || true
+# ---- 7. Hentikan tunnel OLLAMA lama, buka ke OLLAMA (satu URL: API, CORS open) ----
+# Pkill spesifik (URL Ollama) — webui.sh punya tunnel sendiri, tak ganggu.
+pkill -f "cloudflared tunnel --url http://localhost:$PORT" 2>/dev/null || true
 sleep 1
 
 echo "Buka Cloudflare Tunnel (ke Ollama port $PORT)..."
-TUNNEL_LOG=/tmp/tunnel.log
+TUNNEL_LOG=/tmp/tunnel-ollama.log
+rm -f "$TUNNEL_LOG"
 nohup cloudflared tunnel --url "http://localhost:$PORT" > "$TUNNEL_LOG" 2>&1 &
 
 # Tunggu sampai URL muncul (max 60 detik)
