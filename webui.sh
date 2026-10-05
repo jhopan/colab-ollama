@@ -1,14 +1,14 @@
 #!/bin/bash
 # colab-ollama webui.sh
 # CELL 3 di Colab: serve webui-standalone.html + proxy /v1 Ollama + /search SearXNG
-# di satu port (8080), expose via Cloudflare Tunnel.
+# di satu port (8888), expose via Cloudflare Tunnel.
 # Satu URL: web UI (buka di browser mana pun) + API Ollama + search/scrape.
 #
 # Cara pakai di Colab:
 #   !bash /content/colab-ollama/webui.sh
 
 set -uo pipefail
-PORT=8080
+PORT=8888
 OLLAMA_API="${OLLAMA_API:-http://localhost:11434}"
 SEARCH_API="${SEARCH_API:-http://localhost:8081}"  # SearXNG endpoint (install.sh start di 8081)
 MODEL="${MODEL:-jhopan-unfiltered}"
@@ -26,9 +26,9 @@ import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-PORT = int(os.environ.get("PORT", "8080"))
+PORT = int(os.environ.get("PORT", "8888"))
 OLLAMA = os.environ.get("OLLAMA_API", "http://localhost:11434")
-SEARCH = os.environ.get("SEARCH_API", "http://localhost:8080")  # fallback self
+SEARCH = os.environ.get("SEARCH_API", "http://localhost:8081")  # SearXNG di 8081
 MODEL = os.environ.get("MODEL", "jhopan-unfiltered")
 # HTML dari repo
 HTML_PATH = "/content/colab-ollama/webui-standalone.html"
@@ -126,27 +126,27 @@ if ! curl -s --max-time 2 "http://localhost:8081/health" > /dev/null 2>&1; then
     sleep 2
 fi
 
-# Jalankan webui di port 8080
-OLLAMA_API="$OLLAMA_API" SEARCH_API="http://localhost:8081" MODEL="$MODEL" PORT=8080 \
+# Jalankan webui di port 8888
+OLLAMA_API="$OLLAMA_API" SEARCH_API="http://localhost:8081" MODEL="$MODEL" PORT=8888 \
 nohup python3 /tmp/colab-webui.py > /tmp/webui.log 2>&1 &
 
 # Tunggu webui siap
 READY=0
 for i in $(seq 1 20); do
-    if curl -s --max-time 2 "http://localhost:8080/health" | grep -q '"ok"'; then
+    if curl -s --max-time 2 "http://localhost:8888/health" | grep -q '"ok"'; then
         READY=1; break
     fi
     sleep 1
 done
-[ "$READY" = 1 ] && echo "Web UI siap di port 8080" || {
+[ "$READY" = 1 ] && echo "Web UI siap di port 8888" || {
     echo "ERROR: webui tak hidup. Cek /tmp/webui.log"; tail -20 /tmp/webui.log; exit 1;
 }
 
-# Buka tunnel baru ke port 8080 (webui)
+# Buka tunnel baru ke port 8888 (webui)
 pkill -f "cloudflared tunnel" 2>/dev/null || true
 sleep 1
 TUNNEL_LOG=/tmp/webui-tunnel.log
-nohup cloudflared tunnel --url "http://localhost:8080" > "$TUNNEL_LOG" 2>&1 &
+nohup cloudflared tunnel --url "http://localhost:8888" > "$TUNNEL_LOG" 2>&1 &
 URL=""
 for i in $(seq 1 30); do
     URL=$(grep -oiE 'https://[a-z0-9-]+\.trycloudflare\.com' "$TUNNEL_LOG" 2>/dev/null | head -1 || true)
