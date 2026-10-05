@@ -51,7 +51,10 @@ footer button:disabled{opacity:.45;cursor:wait}
 // ============================================================
 // Config (localStorage, persist antar mesin)
 // ============================================================
-const DEF={base:'',key:'ollama',model:'jhopan-unfiltered'};
+// Kalau halaman di-serve lewat tunnel webui.sh (host *.trycloudflare.com),
+// proxy /v1 & /search ada DI ORIGIN SAMA → auto-fill, nol CORS, nol config.
+const AUTO = location.hostname.indexOf('trycloudflare.com')>=0 ? location.origin : '';
+const DEF={base: (AUTO?AUTO+'/v1':''), key:'ollama', model:'jhopan-unfiltered'};
 function loadCfg(){try{return JSON.parse(localStorage.getItem('colabollama')||'null')||DEF;}catch(e){return DEF;}}
 function saveCfg(){
   const c={base:document.getElementById('base').value.trim(),
@@ -61,6 +64,7 @@ function saveCfg(){
   setStatus(c.base?'ok':'idle');
 }
 const C=loadCfg();
+if(!C.base && AUTO){C.base=AUTO+'/v1';}
 document.getElementById('base').value=C.base;
 document.getElementById('key').value=C.key;
 document.getElementById('model').value=C.model;
@@ -159,11 +163,26 @@ async function send(){
     setStatus('ok');
   }catch(e){
     const t=document.getElementById('think');t&&t.remove();
-    add('sys','Error: '+e);
+    add('sys','Error: '+e+' | URL coba: '+base+'/chat/completions | '
+      +'Kalau Failed to fetch: tunnel mati / URL lama di localStorage. '
+      +'Refresh (Ctrl+Shift+R), atau buka lewat tunnel SEL 3 (webui.sh) untuk auto-config.');
     setStatus('err');
   }
   busy=false;btn.disabled=false;btn.textContent='Kirim';
 }
-window.onload=()=>{add('sys','SIAP. Isi Base URL + Model, klik Simpan. Web UI bisa dipakai dari mana pun (localStorage).');q.focus();};
+window.onload=async()=>{
+  if(AUTO){
+    add('sys','MODE AUTO: halaman di-serve lewat tunnel webui.sh → nol config. Pastikan Model benar, lalu chat.');
+    try{
+      const r=await fetch(AUTO+'/health',{signal:AbortSignal.timeout(8000)});
+      const d=await r.json();
+      if(d.ok)setStatus(d.ollama_live?'ok':'err');
+      if(!d.ollama_live)add('sys','PERINGATAN: Ollama belum hidup di Colab. Jalankan SEL 1 (run.sh) dulu.');
+    }catch(e){add('sys','Web UI hidup, tapi cek /health gagal: '+e);}
+  }else{
+    add('sys','SIAP. Isi Base URL + Model, klik Simpan. Zero-config: buka lewat tunnel webui.sh (SEL 3).');
+  }
+  q.focus();
+};
 </script>
 </body></html>
